@@ -83,10 +83,14 @@ def test_backup(fail_at, app, client, storage):
         response = client.get(response.json()["status_url"])
         assert response.status_code == 200, response.json()
         if fail_at:
-            assert response.json() == {"state": "fail"}
+            assert response.json().get("state") == "fail"
+            assert response.json().get("progress") is not None
+            assert not response.json().get("progress")["final"]
             assert not storage.list_jsons()
         else:
-            assert response.json() == {"state": "done"}
+            assert response.json().get("state") == "done"
+            assert response.json().get("progress") is not None
+            assert response.json().get("progress")["final"]
             assert len(storage.list_jsons()) == 1
 
         assert app.state.coordinator_state.op_info.op_id == 1

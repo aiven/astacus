@@ -8,12 +8,13 @@ from .state import coordinator_state, CoordinatorState
 from astacus.common import asyncstorage, exceptions, ipc, magic, op, statsd, utils
 from astacus.common.cachingjsonstorage import MultiCachingJsonStorage
 from astacus.common.magic import LockCall
+from astacus.common.progress import Progress
 from astacus.common.rohmustorage import MultiRohmuStorage
 from astacus.common.storage import HexDigestStorage, JsonStorage, MultiFileStorage, MultiStorage
 from datetime import datetime
 from enum import Enum
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlunsplit
 
 import asyncio
@@ -35,6 +36,7 @@ class LockResult(Enum):
 class CoordinatorOp(op.Op):
     attempt = -1  # try_run iteration number
     attempt_start: Optional[datetime] = None  # try_run iteration start time
+    node_progress: Dict[str, Progress]
 
     def __init__(self, *, c: "Coordinator"):
         super().__init__(info=c.state.op_info)
@@ -46,6 +48,7 @@ class CoordinatorOp(op.Op):
         self.json_mstorage = c.json_mstorage
         self.set_storage_name(self.default_storage_name)
         self.subresult_received_event = asyncio.Event()
+        self.progress = Progress()
 
     @property
     def subresult_url(self):
@@ -148,8 +151,14 @@ class CoordinatorOp(op.Op):
             logger.info("%s - permanent failure: %r", name, ex)
         self.set_status_fail()
 
-    async def wait_successful_results(self, start_results, *, result_class, all_nodes=True):
+    async def wait_successful_results(
+        self, start_results, *, result_class, all_nodes=True
+    ):  # pylint: disable-msg=too-many-locals
         urls = []
+        self.node_progress = {}
+        self.progress = Progress()
+        self.progress.start(0)
+
         for i, result in enumerate(start_results, 1):
             if not result or isinstance(result, Exception):
                 logger.info("wait_successful_results: Incorrect start result for #%d/%d: %r", i, len(start_results), result)
@@ -194,11 +203,19 @@ class CoordinatorOp(op.Op):
                 failures[i] = 0
                 if result.progress.finished_failed:
                     return []
+                self.node_progress[result.hostname] = result.progress
+                for progress in self.node_progress.values():
+                    self.progress.add_total(progress.total)
+                    if progress.handled:
+                        self.progress.add_success(progress.handled)
+                    if progress.failed:
+                        self.progress.add_fail(progress.failed)
             if not any(True for result in results if result is None or not result.progress.final):
                 break
         else:
             logger.debug("wait_successful_results timed out")
             return []
+        self.progress.done()
         return results
 
     async def download_backup_manifest(self, backup_name: str) -> ipc.BackupManifest:

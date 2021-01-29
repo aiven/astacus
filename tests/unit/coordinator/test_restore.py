@@ -138,9 +138,13 @@ def test_restore(rt, app, client, mstorage):
         response = client.get(response.json()["status_url"])
         assert response.status_code == 200, response.json()
         if rt.fail_at:
-            assert response.json() == {"state": "fail"}
+            assert response.json().get("state") == "fail"
+            assert response.json().get("progress") is not None
+            assert not response.json().get("progress")["final"]
         else:
-            assert response.json() == {"state": "done"}
+            assert response.json().get("state") == "done"
+            assert response.json().get("progress") is not None
+            assert response.json().get("progress")["final"]
         assert app.state.coordinator_state.op_info.op_id == 1
 
 

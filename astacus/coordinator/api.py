@@ -7,7 +7,7 @@ from .cleanup import CleanupOp
 from .coordinator import Coordinator
 from .list import list_backups
 from .lockops import LockOps
-from .plugins import get_plugin_backup_class, get_plugin_restore_class
+from .plugins import base, get_plugin_backup_class, get_plugin_restore_class
 from .state import CachedListResponse
 from astacus.common import ipc
 from astacus.common.op import Op
@@ -34,8 +34,11 @@ class OpName(str, Enum):
 
 @router.get("/{op_name}/{op_id}")
 def op_status(*, op_name: OpName, op_id: int, c: Coordinator = Depends()):
-    _, op_info = c.get_op_and_op_info(op_id=op_id, op_name=op_name)
-    return {"state": op_info.op_status}
+    op, op_info = c.get_op_and_op_info(op_id=op_id, op_name=op_name)
+    result = {"state": op_info.op_status}
+    if isinstance(op, (base.RestoreOpBase, base.BackupOpBase)):
+        result["progress"] = op.progress
+    return result
 
 
 class LockStartResult(Op.StartResult):
